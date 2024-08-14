@@ -1,5 +1,5 @@
 import os
-import pickle
+import pickle, time, base64
 # Gmail API utils
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -14,6 +14,8 @@ from email.mime.audio import MIMEAudio
 from email.mime.base import MIMEBase
 from mimetypes import guess_type as guess_mime_type
 from configparser import ConfigParser
+from googleapiclient.errors import HttpError
+from bs4 import BeautifulSoup
 
 config = ConfigParser()
 config.read('settings.conf')
@@ -49,15 +51,60 @@ def gmail_authenticate():
 def write_csv(file: str) -> None:
     pass
 
+def startup():
+    try:
+        service = gmail_authenticate()
+    except HttpError as err:
+        print(err)
+    return service
+
+def parse_html(html) -> BeautifulSoup:
+    soup = BeautifulSoup(html, 'html.parser')
+    print(soup.body)
+    return soup
+
+def read_messages(service, messages) -> None:
+    for message in messages:
+        msg = service.users().messages().get(userId='me', id=message['id'], format='full').execute()
+        payload = msg['payload']
+        headers = payload.get('headers')
+        # print(f"headers {headers}")
+        for header in headers:
+            name = header['name']
+            # if name.lower() != "from":
+            #     print(header)
+            #     break
+            from_name = header["value"]
+            for part in msg['payload']['parts']:
+                try:
+                    data = part['body']['data']
+                    byte_code = base64.urlsafe_b64decode(data)
+                    html = byte_code.decode("utf-8")
+                    parsed = parse_html(html)
+                    with open("./file.html", "w") as f:
+                        f.write(parsed.prettify())
+                        f.close()
+                    print(html)
+                    # return
+                    # print ("This is the message: "+ str(html))
+                except BaseException as err:
+                    print(f"unable to decode base64: {err}")
+            # return
+            # print(email)
+        # print(email_data)
 
 
 def main():
-    service = gmail_authenticate()
+    service = startup()
 
-    res = service.users().labels().list(userId="me").execute()
-    labels = res.get('labels', [])
 
-    print(labels)
-
+    # print(messages[0])
+    while True:
+        res = service.users().messages().list(userId="me", labelIds=['INBOX']).execute()
+        messages = res.get('messages', [])
+        
+        read_messages(service, messages)
+        # sleep to avoid CPU usage
+        time.sleep(10)
 
 main()
