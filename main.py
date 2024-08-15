@@ -1,5 +1,5 @@
 import os
-import pickle, time, base64
+import pickle, time, base64, datetime
 # Gmail API utils
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -16,13 +16,17 @@ from mimetypes import guess_type as guess_mime_type
 from configparser import ConfigParser
 from googleapiclient.errors import HttpError
 from bs4 import BeautifulSoup
+from enum import Enum
+
 
 config = ConfigParser()
 config.read('settings.conf')
 # Request all access (permission to read/send/receive emails, manage the inbox, and more)
 SCOPES = ['https://mail.google.com/']
 EMAIL = config.get("General", "email")
-
+RENT = ""
+WATER = ""
+ELECTRIC = ""
 
 def gmail_authenticate():
     creds = None
@@ -60,40 +64,55 @@ def startup():
 
 def parse_html(html) -> BeautifulSoup:
     soup = BeautifulSoup(html, 'html.parser')
-    print(soup.body)
+    # print(soup.body)
     return soup
 
+def handle_subject(subject):
+    pass
+
+
+def handle_date(date):
+    pass
+
+
+def handle_sender(sender) -> bool:
+    sender_fr: str = sender['value']
+    if 'raleighwater' in sender_fr.lower():
+        return True
+    return False
+
 def read_messages(service, messages) -> None:
+    today = datetime.datetime.now()
+    all_messages = []
     for message in messages:
         msg = service.users().messages().get(userId='me', id=message['id'], format='full').execute()
+        if not msg:
+            continue
+        tmp_dict = {}
         payload = msg['payload']
         headers = payload.get('headers')
+        is_payment = True
         # print(f"headers {headers}")
         for header in headers:
-            name = header['name']
-            # if name.lower() != "from":
-            #     print(header)
-            #     break
-            from_name = header["value"]
-            for part in msg['payload']['parts']:
-                try:
-                    data = part['body']['data']
-                    byte_code = base64.urlsafe_b64decode(data)
-                    html = byte_code.decode("utf-8")
-                    parsed = parse_html(html)
-                    with open("./file.html", "w") as f:
-                        f.write(parsed.prettify())
-                        f.close()
-                    print(html)
-                    # return
-                    # print ("This is the message: "+ str(html))
-                except BaseException as err:
-                    print(f"unable to decode base64: {err}")
-            # return
-            # print(email)
-        # print(email_data)
+            name: str = header['name']
+            if name.lower() == "subject":
+                handle_subject(header)
+            elif name.lower() == "date":
+                handle_date(header)
+            elif name.lower() == "sender":
+                is_payment = handle_sender(header)
+        if not is_payment:
+            continue
+        parts = msg['payload']['parts']
+        for part in parts:
+            part_body = part['body']
+            part_data = part_body['data']
+            html = urlsafe_b64decode(part_data).decode()
+            prettified = parse_html(html=html)
+            tmp_dict['body'] = prettified
+            all_messages.append(tmp_dict)
 
-
+    print(all_messages)
 def main():
     service = startup()
 
@@ -101,7 +120,8 @@ def main():
     # print(messages[0])
     while True:
         res = service.users().messages().list(userId="me", labelIds=['INBOX']).execute()
-        messages = res.get('messages', [])
+        messages = res['messages']
+        print("hellothere")
         
         read_messages(service, messages)
         # sleep to avoid CPU usage
